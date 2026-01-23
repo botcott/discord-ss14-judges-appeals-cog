@@ -62,16 +62,7 @@ async def remove_data(judge_id: int, appeal_id: int, filename=f"{os.path.dirname
         now = datetime.datetime.now()
         closing_time = now.strftime("%m.%Y.%H.%M.%S")
 
-        if "closed_appeals" not in data[judge_id_str]:
-            data[judge_id_str]["closed_appeals"] = {
-                "appeals": [],
-                "closed_appeals_time": []
-            }
-
-        data[judge_id_str]["closed_appeals"]["appeals"].append(removed_appeal)
-        data[judge_id_str]["closed_appeals"]["closed_appeals_time"].append(closing_time)
-
-        logging.info(f"appeal_id {appeal_id} перемещен в closed_appeals")
+        logging.info(f"appeal_id {appeal_id} удалён")
 
     except ValueError:
         logging.warning(f"Предупреждение: appeal_id {appeal_id} не найден")

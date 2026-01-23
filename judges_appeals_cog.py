@@ -7,7 +7,8 @@ import discord
 from discord.ext import commands
 
 from .data.appeals import (save_data, remove_data, check_appeal, get_judge, 
-    get_all_appeals, calc_time, update_time, get_time, get_appeals_info)
+    get_all_appeals, calc_time, update_time, get_time, get_appeals_info, log_thread_closure, get_thread_logs,
+    was_thread_closed, init_db)
 
 with open(f"{os.path.dirname(__file__)}/config/config.json", "r", encoding="utf-8") as f:
     cfg = json.load(f)
@@ -26,6 +27,7 @@ class JudgesAppealsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.logger = logging.getLogger(__name__)
+        init_db()
 
     @commands.slash_command(name="accept_appeal", description="Принять обжалование")
     async def accept_appeal(self, ctx: discord.ApplicationContext):
@@ -66,8 +68,13 @@ class JudgesAppealsCog(commands.Cog):
             return
 
         await remove_data(ctx.author.id, ctx.channel_id)
-        await ctx.respond(f"Обжалование было закрыто судьёй <@{ctx.author.id}>")
+        log_thread_closure(
+            user_id=ctx.author.id,
+            thread_id=thread.id,
+            channel_id=appeal_channel_id,
+        )
 
+        await ctx.respond(f"Обжалование было закрыто судьёй <@{ctx.author.id}>")
         await thread.edit(archived=True, locked=True)
 
     @commands.slash_command(name="get_appeals", description="Список обжалований у пользователя")
