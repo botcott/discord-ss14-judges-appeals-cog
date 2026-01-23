@@ -22,6 +22,76 @@ async def form(count) -> str:
         return f"Было найдено {count} обжалования"
     else:
         return f"Было найдено {count} обжалований"
+    
+class PaginatedView(discord.ui.View):
+    def __init__(self, embeds: list[discord.Embed]):
+        super().__init__()
+        self.embeds = embeds
+        self.current_page = 0
+        self.message: discord.WebhookMessage | None = None
+        self.update_buttons()
+
+    def update_buttons(self):
+        """Обновляет состояние кнопок в зависимости от текущей страницы"""
+        self.first_page.disabled = self.current_page == 0
+        self.previous_page.disabled = self.current_page == 0
+        self.next_page.disabled = self.current_page == len(self.embeds) - 1
+        self.last_page.disabled = self.current_page == len(self.embeds) - 1
+
+    async def on_timeout(self):
+        """Прекращает работу после таймаута"""
+        for button in self.children:
+            button.disabled = True
+        try:
+            if self.message:
+                await self.message.edit(view=self)
+        except discord.NotFound:
+            pass
+
+    @discord.ui.button(label="⏪", style=discord.ButtonStyle.secondary)
+    async def first_page(self, button: discord.ui.Button, interaction: discord.Interaction):
+        self.current_page = 0
+        self.update_buttons()
+        await self.update_embed(interaction)
+
+    @discord.ui.button(label="◀️", style=discord.ButtonStyle.secondary)
+    async def previous_page(self, button: discord.ui.Button, interaction: discord.Interaction):
+        self.current_page = max(0, self.current_page - 1)
+        self.update_buttons()
+        await self.update_embed(interaction)
+
+    @discord.ui.button(label="▶️", style=discord.ButtonStyle.secondary)
+    async def next_page(self, button: discord.ui.Button, interaction: discord.Interaction):
+        self.current_page = min(len(self.embeds) - 1, self.current_page + 1)
+        self.update_buttons()
+        await self.update_embed(interaction)
+
+    @discord.ui.button(label="⏩", style=discord.ButtonStyle.secondary)
+    async def last_page(self, button: discord.ui.Button, interaction: discord.Interaction):
+        self.current_page = len(self.embeds) - 1
+        self.update_buttons()
+        await self.update_embed(interaction)
+
+    @discord.ui.button(label="❌", style=discord.ButtonStyle.red)
+    async def stop(self, button: discord.ui.Button, interaction: discord.Interaction):
+        """Останавливает пагинацию (удаляет сообщение)"""
+        if self.message:
+            try:
+                await self.message.delete()
+            except discord.NotFound:
+                pass
+            self.message = None
+        self.clear_items()
+
+    async def update_embed(self, interaction: discord.Interaction):
+        """Обновляет текущий Embed и состояние кнопок"""
+        if self.message:
+            await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
+
+    async def send(self, ctx):
+        """Отправляет первое сообщение и активирует пагинацию"""
+        self.update_buttons()
+        self.message = await ctx.respond(embed=self.embeds[self.current_page], view=self)
 
 class JudgesAppealsCog(commands.Cog):
     def __init__(self, bot):
@@ -77,34 +147,38 @@ class JudgesAppealsCog(commands.Cog):
         await ctx.respond(f"Обжалование было закрыто судьёй <@{ctx.author.id}>")
         await thread.edit(archived=True, locked=True)
 
-    @commands.slash_command(name="get_appeals", description="Список обжалований у пользователя")
-    async def get_appeals(self, ctx: discord.ApplicationContext, member: discord.Member = False):
+    @commands.slash_command(name="complaints_stats", description="Список обжалований у пользователя")
+    async def complaints_stats(self, ctx: discord.ApplicationContext, member: discord.Member = False):
 
         if (not member):
             member = ctx.author
 
-        appeal_info = await get_appeals_info(member.id)
+        logs = get_thread_logs(user_id=member.id, channel_id=appeal_channel_id)
+        
+        # Создание embed для пагинации
+        embeds = []
+        for i in range(0, len(logs), 5):
+            log_page = logs[i:i + 5]
 
-        if appeal_info:
-            open_count = len(appeal_info["open_appeals"])
-            closed_count = len(appeal_info["closed_appeals"])
-
-            answer = discord.Embed(title=f"Обжалования {member.name}", colour=0x41f096)
-
-            answer.add_field(name="Общее количество", inline=False,
-                value=f"{await form(closed_count+open_count)}"
-            )
-            answer.add_field(name="Открытые обжалования", inline=False,
-                value=f"{await form(open_count)}"
-            )
-            answer.add_field(name="Закрытые обжалования", inline=False,
-                value=f"{await form(closed_count)}"
+            embed = discord.Embed(
+                title = f"Статистика закрытых обжалований для {member.display_name}",
+                color=discord.Color.blue(),
             )
 
-            await ctx.respond(embed=answer, ephemeral=True)
-        else:
-            await ctx.respond(f"Информация о {member.name} не найдена", ephemeral=True)
-    
+            for log_item in log_page:
+                thread_url = f"https://discord.com/channels/{ctx.guild.id}/{log_item.thread_id}"
+                embed.add_field(
+                    name=f"Тема: {thread_url}",
+                    value=f"Закрыта: {log_item.closed_at.strftime('%Y-%m-%d %H:%M')}",
+                    inline=False,
+                )
+            embed.set_footer(text=f"Общее количество: {len(logs)}")
+            embeds.append(embed)
+
+        # Отправка через PaginatedView
+        view = PaginatedView(embeds)
+        await view.send(ctx)
+        
     @commands.Cog.listener()
     async def on_message(self, message):
         if (message.author.id == self.bot.user.id): return
